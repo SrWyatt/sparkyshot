@@ -1,17 +1,7 @@
-# Interfaz Gráfica
 PyQt6>=6.6.0
-
-# Captura de Pantalla (Rápida y Multiplataforma)
 mss>=9.0.1
-
-# Procesamiento de Imagen (Blur, Pixelado, Formas)
 opencv-python>=4.9.0
 numpy>=1.26.0
-
-# Detección de Códigos QR (Más robusto que el de OpenCV nativo)
 pyzbar>=0.1.9
-
-# Utilidades del Sistema (Portapapeles extra si hace falta, rutas)
 Pillow>=10.0.0
-
 pyperclip
