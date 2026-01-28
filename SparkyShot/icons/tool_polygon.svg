@@ -1,0 +1,15 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1500" width="1500" height="1500">
+	<style>
+		tspan { white-space:pre } 
+		.s0 { fill: #171718 } 
+		.s1 { fill: none;stroke: #ffffff;stroke-miterlimit:100;stroke-width: 81 } 
+	</style>
+	<path id="Rectángulo_1" fill-rule="evenodd" class="s0" d="m370.78 81.67h758.44c160.16 0 290 129.84 290 290v756.65c0 160.17-129.84 290-290 290h-758.44c-160.16 0-290-129.83-290-290v-756.64c0-160.17 129.84-290 290-290.01z"/>
+	<g id="Grupo_11">
+		<g id="Grupo_12">
+			<g id="+">
+				<path id="Capa 2" fill-rule="evenodd" class="s1" d="m940.78 1273.45l-465.46-53.58-248.32-397.32 155.81-441.87 442.61-153.68 396.12 250.23 51.34 465.71z"/>
+			</g>
+		</g>
+	</g>
+</svg>
