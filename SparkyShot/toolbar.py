@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QPushButton, QSlider, QColorDialog,
                              QDialog, QFrame, QLabel, QSpinBox, QVBoxLayout, QInputDialog)
 from PyQt6.QtGui import QIcon, QColor, QPen, QCursor, QPixmap
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer
 import os
 from utils import load_svg_icon
 
@@ -283,7 +283,10 @@ class EditorToolbar(QWidget):
 
         self.add_btn(layout, "action_undo.svg", "undo", "Undo")
         self.add_btn(layout, "action_redo.svg", "redo", "Redo")
-        self.add_btn(layout, "action_copy.svg", "copy", "Copy to Clipboard")
+
+        # Guardamos el botón de copiar en self.btn_copy para animarlo
+        self.btn_copy = self.add_btn(layout, "action_copy.svg", "copy", "Copy to Clipboard")
+
         self.add_btn(layout, "action_save.svg", "save", "Save Image")
 
         self.update_active_tool("cursor")
@@ -312,6 +315,26 @@ class EditorToolbar(QWidget):
             self.tool_buttons[mode] = btn
         layout.addWidget(btn)
         return btn
+
+    def show_copy_feedback(self):
+        """Cambia el icono del botón copiar a 'accept' temporalmente"""
+        accept_path = os.path.join(self.icons_path, "action_accept.svg")
+        copy_path = os.path.join(self.icons_path, "action_copy.svg")
+
+        if os.path.exists(accept_path):
+            self.btn_copy.setIcon(load_svg_icon(accept_path))
+
+        original_tooltip = self.btn_copy.toolTip()
+        self.btn_copy.setToolTip("Copied!")
+
+        # Función interna para restaurar el estado original
+        def restore():
+            if os.path.exists(copy_path):
+                self.btn_copy.setIcon(load_svg_icon(copy_path))
+            self.btn_copy.setToolTip(original_tooltip)
+
+        # Restaurar después de 1.5 segundos
+        QTimer.singleShot(1500, restore)
 
     def on_tool_clicked(self, mode):
         self.tool_selected.emit(mode)

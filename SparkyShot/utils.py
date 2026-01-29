@@ -48,9 +48,18 @@ def convert_opencv_to_qpixmap(cv_img):
     return QPixmap.fromImage(qimage.copy())
 
 def apply_pixelate(image, x, y, w, h, block_size=10):
-    if w < 1 or h < 1: return image
+    if w < 1 or h < 1 or x < 0 or y < 0: return image
+
+    img_h, img_w = image.shape[:2]
+    if x + w > img_w: w = img_w - x
+    if y + h > img_h: h = img_h - y
+    if w <= 0 or h <= 0: return image
+
     if block_size < 2: block_size = 2
     roi = image[y:y+h, x:x+w]
+
+    if roi.size == 0: return image
+
     small_w = max(1, w // block_size)
     small_h = max(1, h // block_size)
     small = cv2.resize(roi, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
@@ -60,10 +69,19 @@ def apply_pixelate(image, x, y, w, h, block_size=10):
     return result
 
 def apply_blur(image, x, y, w, h, kernel_size=51):
-    if w < 1 or h < 1: return image
+    if w < 1 or h < 1 or x < 0 or y < 0: return image
+
+    img_h, img_w = image.shape[:2]
+    if x + w > img_w: w = img_w - x
+    if y + h > img_h: h = img_h - y
+    if w <= 0 or h <= 0: return image
+
     if kernel_size % 2 == 0: kernel_size += 1
     result = image.copy()
     roi = result[y:y+h, x:x+w]
+
+    if roi.size == 0: return image
+
     blurred = cv2.GaussianBlur(roi, (kernel_size, kernel_size), 0)
     result[y:y+h, x:x+w] = blurred
     return result

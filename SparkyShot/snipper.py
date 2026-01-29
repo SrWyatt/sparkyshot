@@ -211,6 +211,7 @@ class Snipper(QWidget):
             cv_raw = convert_qpixmap_to_opencv(cropped)
             content = detect_qr_content(cv_raw)
             if content:
+                # Si encontramos contenido, abrimos el diálogo (que tiene su propio manejo)
                 dialog = QRDialog(content, self.icons_path)
                 res = dialog.exec()
                 if res == 999:
@@ -218,8 +219,10 @@ class Snipper(QWidget):
                 else:
                     self.close()
             else:
-                self.show_message("QR Error", "QR code not available or not detected.")
+                # CORRECCIÓN: Salir primero, luego mostrar mensaje
                 self.close()
+                QApplication.processEvents() # Asegurar que la UI se actualice
+                self.show_message("QR Error", "QR code not available or not detected.")
         else:
             self.close()
 
