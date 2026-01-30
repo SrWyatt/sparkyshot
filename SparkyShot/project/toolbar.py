@@ -1,8 +1,9 @@
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QPushButton, QSlider, QColorDialog,
                              QDialog, QFrame, QLabel, QSpinBox, QVBoxLayout, QInputDialog)
 from PyQt6.QtGui import QIcon, QColor, QPen, QCursor, QPixmap
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer
 import os
+from utils import load_svg_icon
 
 class AboutDialog(QDialog):
     def __init__(self, icons_path):
@@ -33,9 +34,10 @@ class AboutDialog(QDialog):
 
         lbl_img = QLabel()
         logo_path = os.path.join(self.icons_path, "logo_sparkyshot_svg.svg")
+
         if os.path.exists(logo_path):
-            pix = QPixmap(logo_path)
-            lbl_img.setPixmap(pix.scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            icon = load_svg_icon(logo_path, size=128)
+            lbl_img.setPixmap(icon.pixmap(100, 100))
 
         lbl_img.setStyleSheet("background-color: transparent; padding: 10px;")
         lbl_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -45,10 +47,8 @@ class AboutDialog(QDialog):
 
         lbl_title = QLabel("SparkyShot")
         lbl_title.setStyleSheet("font-size: 22px; font-weight: bold; color: white;")
-
         lbl_ver = QLabel("Version 1.0")
         lbl_ver.setStyleSheet("font-size: 14px; color: #888; margin-bottom: 10px;")
-
         lbl_credits = QLabel("Created by: SrWyatt\n2026")
         lbl_credits.setStyleSheet("font-size: 14px; color: #ccc;")
 
@@ -80,7 +80,6 @@ class SliderDialog(QDialog):
             }
             QLabel { color: #f0f0f0; font-weight: bold; font-family: 'Segoe UI', sans-serif; font-size: 13px; }
             QLabel#Title { color: #aaa; font-size: 11px; margin-bottom: 5px; }
-
             QPushButton {
                 background-color: #007acc;
                 color: white;
@@ -90,7 +89,6 @@ class SliderDialog(QDialog):
                 font-weight: bold;
             }
             QPushButton:hover { background-color: #0099ff; }
-
             QSlider::groove:horizontal {
                 border: 1px solid #333;
                 height: 4px;
@@ -172,7 +170,6 @@ class EditorToolbar(QWidget):
     save_signal = pyqtSignal()
     copy_signal = pyqtSignal()
     sides_signal = pyqtSignal(int)
-
     blur_changed = pyqtSignal(int)
     pixel_changed = pyqtSignal(int)
     text_size_changed = pyqtSignal(int)
@@ -182,14 +179,11 @@ class EditorToolbar(QWidget):
         self.icons_path = icons_path
         self.current_size = 5
         self.current_sides = 6
-
         self.blur_intensity = 15
         self.pixel_intensity = 10
         self.text_size = 24
-
         self.tool_buttons = {}
         self.active_tool = "cursor"
-
         self.initUI()
 
     def initUI(self):
@@ -213,9 +207,8 @@ class EditorToolbar(QWidget):
 
         self.btn_logo = QPushButton()
         logo_path = os.path.join(self.icons_path, "logo_sparkyshot_svg.svg")
-        if os.path.exists(logo_path):
-            self.btn_logo.setIcon(QIcon(logo_path))
-            self.btn_logo.setIconSize(QSize(22, 22))
+        self.btn_logo.setIcon(load_svg_icon(logo_path))
+        self.btn_logo.setIconSize(QSize(22, 22))
 
         self.btn_logo.setFixedSize(32, 32)
         self.btn_logo.setStyleSheet("""
@@ -290,7 +283,10 @@ class EditorToolbar(QWidget):
 
         self.add_btn(layout, "action_undo.svg", "undo", "Undo")
         self.add_btn(layout, "action_redo.svg", "redo", "Redo")
-        self.add_btn(layout, "action_copy.svg", "copy", "Copy to Clipboard")
+
+        # Guardamos el botón de copiar en self.btn_copy para animarlo
+        self.btn_copy = self.add_btn(layout, "action_copy.svg", "copy", "Copy to Clipboard")
+
         self.add_btn(layout, "action_save.svg", "save", "Save Image")
 
         self.update_active_tool("cursor")
@@ -298,18 +294,15 @@ class EditorToolbar(QWidget):
     def add_btn(self, layout, icon_name, mode, tooltip):
         btn = QPushButton()
         icon_path = os.path.join(self.icons_path, icon_name)
-
         if os.path.exists(icon_path):
-            btn.setIcon(QIcon(icon_path))
+            btn.setIcon(load_svg_icon(icon_path))
             btn.setIconSize(QSize(20, 20))
             btn.setFixedSize(32, 32)
         else:
             if mode == "zoom_in": btn.setText("+")
             elif mode == "zoom_out": btn.setText("-")
             else: btn.setText(mode[0].upper())
-
         btn.setToolTip(tooltip)
-
         if mode == "undo": btn.clicked.connect(self.undo_signal.emit)
         elif mode == "redo": btn.clicked.connect(self.redo_signal.emit)
         elif mode == "copy": btn.clicked.connect(self.copy_signal.emit)
@@ -318,12 +311,30 @@ class EditorToolbar(QWidget):
         elif mode == "zoom_out": btn.clicked.connect(self.zoom_out_signal.emit)
         elif mode not in ["color", "size"]:
             btn.clicked.connect(lambda: self.on_tool_clicked(mode))
-
         if mode not in ["undo", "redo", "copy", "save", "zoom_in", "zoom_out", "color", "size"]:
             self.tool_buttons[mode] = btn
-
         layout.addWidget(btn)
         return btn
+
+    def show_copy_feedback(self):
+        """Cambia el icono del botón copiar a 'accept' temporalmente"""
+        accept_path = os.path.join(self.icons_path, "action_accept.svg")
+        copy_path = os.path.join(self.icons_path, "action_copy.svg")
+
+        if os.path.exists(accept_path):
+            self.btn_copy.setIcon(load_svg_icon(accept_path))
+
+        original_tooltip = self.btn_copy.toolTip()
+        self.btn_copy.setToolTip("Copied!")
+
+        # Función interna para restaurar el estado original
+        def restore():
+            if os.path.exists(copy_path):
+                self.btn_copy.setIcon(load_svg_icon(copy_path))
+            self.btn_copy.setToolTip(original_tooltip)
+
+        # Restaurar después de 1.5 segundos
+        QTimer.singleShot(1500, restore)
 
     def on_tool_clicked(self, mode):
         self.tool_selected.emit(mode)
@@ -331,7 +342,6 @@ class EditorToolbar(QWidget):
 
     def update_active_tool(self, mode):
         self.active_tool = mode
-
         style_inactive = """
             QPushButton {
                 border: none;
@@ -343,7 +353,6 @@ class EditorToolbar(QWidget):
                 background-color: rgba(255, 255, 255, 0.1);
             }
         """
-
         style_active = """
             QPushButton {
                 border: 1px solid rgba(255, 255, 255, 0.2);
@@ -352,7 +361,6 @@ class EditorToolbar(QWidget):
                 background-color: rgba(255, 255, 255, 0.15);
             }
         """
-
         for key, btn in self.tool_buttons.items():
             if key == mode:
                 btn.setStyleSheet(style_active)
