@@ -7,6 +7,7 @@ from PyQt6.QtGui import QIcon, QPixmap
 from snipper import Snipper
 from editor import EditorWindow
 from toolbar import AboutDialog
+from utils import resource_path, load_svg_icon
 
 class FloatingToolbar(QWidget):
     def __init__(self):
@@ -45,14 +46,12 @@ class FloatingToolbar(QWidget):
             }
         """)
 
-        self.base_path = os.path.dirname(os.path.abspath(__file__))
-        self.icons_path = os.path.join(self.base_path, '..', 'icons')
+        self.icons_path = resource_path('icons')
 
         self.btn_logo = QPushButton()
         logo_path = os.path.join(self.icons_path, "logo_sparkyshot_svg.svg")
-        if os.path.exists(logo_path):
-            self.btn_logo.setIcon(QIcon(logo_path))
-            self.btn_logo.setIconSize(QSize(26, 26))
+        self.btn_logo.setIcon(load_svg_icon(logo_path))
+        self.btn_logo.setIconSize(QSize(26, 26))
 
         self.btn_logo.setFixedSize(36, 36)
         self.btn_logo.setStyleSheet("""
@@ -85,9 +84,8 @@ class FloatingToolbar(QWidget):
 
         self.btn_move = QPushButton()
         move_path = os.path.join(self.icons_path, "tool_move.svg")
-        if os.path.exists(move_path):
-            self.btn_move.setIcon(QIcon(move_path))
-            self.btn_move.setIconSize(QSize(20, 20))
+        self.btn_move.setIcon(load_svg_icon(move_path))
+        self.btn_move.setIconSize(QSize(20, 20))
         self.btn_move.setCursor(Qt.CursorShape.SizeAllCursor)
         self.btn_move.installEventFilter(self)
         self.btn_move.setStyleSheet("QPushButton:hover { background-color: transparent; }")
@@ -99,13 +97,12 @@ class FloatingToolbar(QWidget):
 
         self.center_top()
 
-    def create_btn(self, layout, icon, tooltip, action):
+    def create_btn(self, layout, icon_name, tooltip, action):
         btn = QPushButton()
-        path = os.path.join(self.icons_path, icon)
-        if os.path.exists(path):
-            btn.setIcon(QIcon(path))
-            btn.setIconSize(QSize(28, 28))
-            btn.setFixedSize(38, 38)
+        path = os.path.join(self.icons_path, icon_name)
+        btn.setIcon(load_svg_icon(path))
+        btn.setIconSize(QSize(28, 28))
+        btn.setFixedSize(38, 38)
         btn.setToolTip(tooltip)
         btn.clicked.connect(action)
         layout.addWidget(btn)
@@ -151,6 +148,23 @@ class FloatingToolbar(QWidget):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    app.setApplicationName("SparkShot")
+
+    icon_path_svg = resource_path(os.path.join("icons", "logo_sparkyshot_svg.svg"))
+    if os.path.exists(icon_path_svg):
+        app.setWindowIcon(QIcon(icon_path_svg))
+    else:
+        icon_path_png = resource_path(os.path.join("icons", "logo_sparkyshot.png"))
+        if os.path.exists(icon_path_png):
+             app.setWindowIcon(QIcon(icon_path_png))
+
+    if os.name == 'nt':
+        try:
+            from ctypes import windll
+            windll.shell32.SetCurrentProcessExplicitAppUserModelID('sparkyshot.app.1.0')
+        except:
+            pass
+
     window = FloatingToolbar()
     window.show()
     sys.exit(app.exec())
