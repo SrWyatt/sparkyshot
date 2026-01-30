@@ -7,7 +7,7 @@ import mss
 import numpy as np
 import cv2
 import os
-from utils import convert_opencv_to_qpixmap, convert_qpixmap_to_opencv, detect_qr_content
+from utils import convert_opencv_to_qpixmap, convert_qpixmap_to_opencv, detect_qr_content, load_svg_icon
 
 class QRDialog(QDialog):
     def __init__(self, content, icons_path):
@@ -47,9 +47,9 @@ class QRDialog(QDialog):
         self.btn_copy = QPushButton()
         self.btn_copy.setObjectName("BtnCopy")
         self.btn_copy.setFixedSize(40, 40)
-        copy_icon = os.path.join(self.icons_path, "action_copy.svg")
-        if os.path.exists(copy_icon):
-            self.btn_copy.setIcon(QIcon(copy_icon))
+        copy_icon_path = os.path.join(self.icons_path, "action_copy.svg")
+        if os.path.exists(copy_icon_path):
+            self.btn_copy.setIcon(load_svg_icon(copy_icon_path))
             self.btn_copy.setIconSize(QSize(28, 28))
         else:
             self.btn_copy.setText("C")
@@ -93,9 +93,6 @@ class QRDialog(QDialog):
         self.done(999)
 
 class SnipperView(QGraphicsView):
-    """
-    Custom GraphicsView to handle selection logic directly.
-    """
     def __init__(self, scene, parent_snipper):
         super().__init__(scene)
         self.parent_snipper = parent_snipper
@@ -118,7 +115,6 @@ class SnipperView(QGraphicsView):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.parent_snipper.finish_selection(self.mapToScene(event.pos()))
-
 
 class Snipper(QWidget):
     captured_signal = pyqtSignal(QPixmap, str)
@@ -181,36 +177,26 @@ class Snipper(QWidget):
 
     def update_selection(self, pos):
         if not self.is_selecting: return
-
         rect = QRectF(self.start_point, pos).normalized()
         self.selection_rect_item.setRect(rect)
         self.update_dimmer(rect)
 
     def update_dimmer(self, selection_rect):
-        """
-        Creates a path that covers the whole screen MINUS the selection_rect.
-        """
         path = QPainterPath()
         path.setFillRule(Qt.FillRule.OddEvenFill)
-
         path.addRect(QRectF(self.original_pixmap.rect()))
-
         if not selection_rect.isEmpty():
             path.addRect(selection_rect)
-
         self.dim_path_item.setPath(path)
 
     def finish_selection(self, pos):
         if not self.is_selecting: return
         self.is_selecting = False
         self.selection_rect_item.hide()
-
         rect = QRectF(self.start_point, pos).normalized()
-
         if rect.width() < 5 or rect.height() < 5:
             self.update_dimmer(QRectF())
             return
-
         if self.mode == "qr":
             self.handle_qr_selection(rect)
         else:
@@ -220,14 +206,12 @@ class Snipper(QWidget):
         rect = rect_f.toRect()
         img_rect = self.original_pixmap.rect()
         safe_rect = rect.intersected(img_rect)
-
         if safe_rect.width() > 0 and safe_rect.height() > 0:
             cropped = self.original_pixmap.copy(safe_rect)
-
             cv_raw = convert_qpixmap_to_opencv(cropped)
             content = detect_qr_content(cv_raw)
-
             if content:
+                # Si encontramos contenido, abrimos el diálogo (que tiene su propio manejo)
                 dialog = QRDialog(content, self.icons_path)
                 res = dialog.exec()
                 if res == 999:
@@ -235,8 +219,10 @@ class Snipper(QWidget):
                 else:
                     self.close()
             else:
-                self.show_message("QR Error", "QR code not available or not detected.")
+                # CORRECCIÓN: Salir primero, luego mostrar mensaje
                 self.close()
+                QApplication.processEvents() # Asegurar que la UI se actualice
+                self.show_message("QR Error", "QR code not available or not detected.")
         else:
             self.close()
 
