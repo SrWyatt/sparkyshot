@@ -1,351 +1,394 @@
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene,
-                             QGraphicsPixmapItem, QMessageBox, QFileDialog,
-                             QInputDialog, QApplication, QGraphicsPathItem)
-from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal
-from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QPainterPath, QPixmap, QFont, QCursor
-import math
-import numpy as np
+import os
 import cv2
+import numpy as np
+import datetime
+from PyQt6.QtWidgets import (QMainWindow, QGraphicsView, QGraphicsScene, QWidget,
+                             QVBoxLayout, QFileDialog, QApplication, QGraphicsPixmapItem,
+                             QInputDialog, QMessageBox)
+from PyQt6.QtCore import Qt, pyqtSignal, QPointF, QRectF
+from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QAction, QPainterPath, QBrush, QPolygonF
 
 from toolbar import EditorToolbar
-from utils import calculate_ngon_points, convert_qpixmap_to_opencv, apply_pixelate, apply_blur, convert_opencv_to_qpixmap
+from utils import apply_blur, apply_pixelate, calculate_ngon_points, convert_opencv_to_qpixmap, convert_qpixmap_to_opencv
 
-class EditorView(QGraphicsView):
-    def __init__(self, scene, parent=None):
-        super().__init__(scene, parent)
-        self.parent_editor = parent
-        self.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
-
-    def mousePressEvent(self, event):
-        if self.parent_editor.current_tool != "cursor" and event.button() == Qt.MouseButton.LeftButton:
-            self.parent_editor.start_drawing(self.mapToScene(event.pos()))
-        else:
-            super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self.parent_editor.is_drawing:
-            self.parent_editor.update_drawing(self.mapToScene(event.pos()))
-        else:
-            super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if self.parent_editor.is_drawing and event.button() == Qt.MouseButton.LeftButton:
-            self.parent_editor.finish_drawing(self.mapToScene(event.pos()))
-        else:
-            super().mouseReleaseEvent(event)
-
-    def wheelEvent(self, event):
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            if event.angleDelta().y() > 0:
-                self.parent_editor.zoom_in()
-            else:
-                self.parent_editor.zoom_out()
-            event.accept()
-        else:
-            super().wheelEvent(event)
-
-class EditorWindow(QWidget):
+class EditorWindow(QMainWindow):
     closed_signal = pyqtSignal()
 
-    def __init__(self, pixmap, icons_path, mode="region"):
+    def __init__(self, pixmap, icons_path, capture_mode="region"):
         super().__init__()
         self.icons_path = icons_path
-        self.pixmap = pixmap
-        self.mode = mode
-
-        self.current_tool = "cursor"
-        self.current_color = QColor(255, 0, 0)
-        self.current_size = 5
-
-        self.blur_intensity = 15
-        self.pixel_intensity = 10
-        self.text_size = 24
-
-        self.polygon_sides = 6
-        self.items_drawn = []
-        self.redo_stack = []
-        self.is_drawing = False
-        self.temp_item = None
-        self.start_point = None
-        self.current_path = None
-        self.bypass_close_confirm = False
-
-        self.initUI()
-
-    def initUI(self):
+        self.capture_mode = capture_mode
         self.setWindowTitle("SparkyShot Editor")
-        self.setWindowFlags(Qt.WindowType.Window)
+        self.setGeometry(100, 100, 900, 700)
 
-        self.setStyleSheet("background-color: #171718;")
-
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        container = QWidget()
+        self.setCentralWidget(container)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         self.toolbar = EditorToolbar(self.icons_path)
-        self.connect_toolbar()
-        main_layout.addWidget(self.toolbar)
+        layout.addWidget(self.toolbar)
 
         self.scene = QGraphicsScene()
-        self.view = EditorView(self.scene, self)
+        self.view = QGraphicsView(self.scene)
         self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.view.setBackgroundBrush(QColor("#222"))
+        layout.addWidget(self.view)
 
-        self.view.setStyleSheet("border: none; background-color: #1e1e1e;")
-        main_layout.addWidget(self.view)
+        self.base_pixmap = pixmap
+        self.current_pixmap = pixmap.copy()
 
-        self.bg_item = QGraphicsPixmapItem(self.pixmap)
-        self.bg_item.setZValue(0)
-        self.scene.addItem(self.bg_item)
-        self.scene.setSceneRect(QRectF(self.pixmap.rect()))
+        self.image_item = QGraphicsPixmapItem(self.current_pixmap)
+        self.image_item.setZValue(0)
+        self.scene.addItem(self.image_item)
 
-        w = min(self.pixmap.width() + 50, 1200)
-        h = min(self.pixmap.height() + 100, 800)
-        self.resize(w, h)
+        self.undo_stack = []
+        self.redo_stack = []
+        self.undo_stack.append(self.current_pixmap.copy())
 
-    def connect_toolbar(self):
+        self.current_tool = "cursor"
+        self.draw_color = QColor(255, 0, 0)
+        self.draw_size = 5
+        self.blur_val = 15
+        self.pixel_val = 10
+        self.text_font_size = 24
+        self.poly_sides = 6
+
+        self.start_point = None
+        self.temp_item = None
+        self.is_drawing = False
+
         self.toolbar.tool_selected.connect(self.set_tool)
-        self.toolbar.color_changed.connect(lambda c: setattr(self, 'current_color', c))
-        self.toolbar.size_changed.connect(lambda s: setattr(self, 'current_size', s))
+        self.toolbar.color_changed.connect(self.set_color)
+        self.toolbar.size_changed.connect(self.set_size)
+        self.toolbar.blur_changed.connect(self.set_blur)
+        self.toolbar.pixel_changed.connect(self.set_pixel)
+        self.toolbar.text_size_changed.connect(self.set_text_size)
+        self.toolbar.sides_signal.connect(self.set_poly_sides)
 
-        self.toolbar.blur_changed.connect(lambda v: setattr(self, 'blur_intensity', v))
-        self.toolbar.pixel_changed.connect(lambda v: setattr(self, 'pixel_intensity', v))
-        self.toolbar.text_size_changed.connect(lambda v: setattr(self, 'text_size', v))
+        self.toolbar.undo_signal.connect(self.undo_action)
+        self.toolbar.redo_signal.connect(self.redo_action)
+        self.toolbar.save_signal.connect(self.save_image)
+        self.toolbar.copy_signal.connect(self.copy_image)
 
-        self.toolbar.sides_signal.connect(lambda s: setattr(self, 'polygon_sides', s))
-        self.toolbar.undo_signal.connect(self.undo_last)
-        self.toolbar.redo_signal.connect(self.redo_last)
         self.toolbar.zoom_changed.connect(self.set_zoom)
         self.toolbar.zoom_in_signal.connect(self.zoom_in)
         self.toolbar.zoom_out_signal.connect(self.zoom_out)
-        self.toolbar.copy_signal.connect(self.finish_copy)
-        self.toolbar.save_signal.connect(self.finish_save)
 
-    def set_tool(self, tool):
-        self.current_tool = tool
-        if tool == "cursor":
-            self.view.setCursor(Qt.CursorShape.ArrowCursor)
+        self.view.viewport().installEventFilter(self)
+
+    def set_tool(self, tool_name):
+        self.current_tool = tool_name
+        if tool_name == "cursor":
             self.view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-        elif tool == "text":
-            self.view.setCursor(Qt.CursorShape.IBeamCursor)
-            self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
+            self.view.setCursor(Qt.CursorShape.OpenHandCursor)
         else:
+            self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
             self.view.setCursor(Qt.CursorShape.CrossCursor)
-            self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
 
-    def start_drawing(self, pos):
+    def set_color(self, color):
+        self.draw_color = color
+
+    def set_size(self, size):
+        self.draw_size = size
+
+    def set_blur(self, val):
+        self.blur_val = val
+
+    def set_pixel(self, val):
+        self.pixel_val = val
+
+    def set_text_size(self, val):
+        self.text_font_size = val
+
+    def set_poly_sides(self, val):
+        self.poly_sides = val
+
+    def set_zoom(self, value):
+        scale = value / 100.0
+        transform = self.view.transform()
+        transform.reset()
+        transform.scale(scale, scale)
+        self.view.setTransform(transform)
+
+    def zoom_in(self):
+        val = self.toolbar.slider_zoom.value()
+        new_val = min(val + 10, 200)
+        self.toolbar.set_zoom_value(new_val)
+        self.set_zoom(new_val)
+
+    def zoom_out(self):
+        val = self.toolbar.slider_zoom.value()
+        new_val = max(val - 10, 10)
+        self.toolbar.set_zoom_value(new_val)
+        self.set_zoom(new_val)
+
+    def push_undo(self):
+        if len(self.undo_stack) > 20:
+            self.undo_stack.pop(0)
+        self.undo_stack.append(self.current_pixmap.copy())
         self.redo_stack.clear()
+
+    def undo_action(self):
+        if len(self.undo_stack) > 1:
+            current = self.undo_stack.pop()
+            self.redo_stack.append(current)
+            prev = self.undo_stack[-1]
+            self.current_pixmap = prev.copy()
+            self.image_item.setPixmap(self.current_pixmap)
+
+    def redo_action(self):
+        if self.redo_stack:
+            nxt = self.redo_stack.pop()
+            self.undo_stack.append(nxt)
+            self.current_pixmap = nxt.copy()
+            self.image_item.setPixmap(self.current_pixmap)
+
+    def save_image(self):
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        default_name = f"sparkyshot_{now_str}.png"
+        path, _ = QFileDialog.getSaveFileName(self, "Save Image", default_name, "PNG Files (*.png);;JPG Files (*.jpg);;All Files (*)")
+        if path:
+            self.current_pixmap.save(path)
+
+    def copy_image(self):
+        clipboard = QApplication.clipboard()
+        clipboard.setPixmap(self.current_pixmap)
+        self.toolbar.show_copy_feedback()
+
+    def eventFilter(self, source, event):
+        if source == self.view.viewport():
+            if event.type() == event.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                if self.current_tool != "cursor":
+                    self.start_drawing(event)
+                    return True
+            elif event.type() == event.Type.MouseMove:
+                if self.is_drawing:
+                    self.update_drawing(event)
+                    return True
+            elif event.type() == event.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+                if self.is_drawing:
+                    self.finish_drawing(event)
+                    return True
+        return super().eventFilter(source, event)
+
+    def get_draw_rect(self, p1, p2, modifiers):
+        x = min(p1.x(), p2.x())
+        y = min(p1.y(), p2.y())
+        w = abs(p2.x() - p1.x())
+        h = abs(p2.y() - p1.y())
+
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            side = max(w, h)
+            target_x = p1.x() + side if p2.x() >= p1.x() else p1.x() - side
+            target_y = p1.y() + side if p2.y() >= p1.y() else p1.y() - side
+            return QRectF(p1, QPointF(target_x, target_y)).normalized()
+
+        return QRectF(p1, p2).normalized()
+
+    def get_arrow_point(self, p1, p2, modifiers):
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            dx = p2.x() - p1.x()
+            dy = p2.y() - p1.y()
+            dist = (dx**2 + dy**2)**0.5
+            if dist > 0:
+                angle = np.arctan2(dy, dx)
+                step = np.pi / 4
+                snapped_angle = round(angle / step) * step
+                return QPointF(p1.x() + dist * np.cos(snapped_angle),
+                               p1.y() + dist * np.sin(snapped_angle))
+        return p2
+
+    def start_drawing(self, event):
         self.is_drawing = True
-        self.start_point = pos
+        sp = self.view.mapToScene(event.pos())
+        self.start_point = sp
 
-        if self.current_tool in ["blur", "pixelate"]:
-            pen = QPen(Qt.GlobalColor.white, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-        else:
-            pen = QPen(self.current_color, self.current_size, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        if self.current_tool == "text":
+            self.handle_text_input(sp)
+            self.is_drawing = False
+        elif self.current_tool == "pen":
+            self.push_undo()
 
-        if self.current_tool == "pen":
-            self.current_path = QPainterPath()
-            self.current_path.moveTo(pos)
-            self.temp_item = self.scene.addPath(self.current_path, pen)
+    def update_drawing(self, event):
+        if not self.start_point: return
 
-        elif self.current_tool in ["rect", "blur", "pixelate", "circle"]:
-            if self.current_tool == "circle":
-                self.temp_item = self.scene.addEllipse(QRectF(pos, pos), pen)
-            else:
-                self.temp_item = self.scene.addRect(QRectF(pos, pos), pen)
-
-        elif self.current_tool in ["arrow", "polygon"]:
-            self.temp_item = self.scene.addPath(QPainterPath(), pen)
-
-    def update_drawing(self, pos):
-        if not self.temp_item: return
-
-        modifiers = QApplication.keyboardModifiers()
-        is_shift = modifiers & Qt.KeyboardModifier.ShiftModifier
-
-        if is_shift and self.current_tool in ["rect", "circle", "blur", "pixelate"]:
-            dx = pos.x() - self.start_point.x()
-            dy = pos.y() - self.start_point.y()
-            size = max(abs(dx), abs(dy))
-            dx = size if dx >= 0 else -size
-            dy = size if dy >= 0 else -size
-            new_pos = QPointF(self.start_point.x() + dx, self.start_point.y() + dy)
-            rect = QRectF(self.start_point, new_pos).normalized()
-        else:
-            rect = QRectF(self.start_point, pos).normalized()
+        current_point = self.view.mapToScene(event.pos())
 
         if self.current_tool == "pen":
-            if isinstance(self.temp_item, QGraphicsPathItem) and self.current_path:
-                self.current_path.lineTo(pos)
-                self.temp_item.setPath(self.current_path)
-
-        elif self.current_tool in ["rect", "blur", "pixelate", "circle"]:
-            self.temp_item.setRect(rect)
-
+            self.paint_on_pixmap(self.current_tool, self.start_point, current_point, final=False)
+            self.image_item.setPixmap(self.current_pixmap)
+            self.start_point = current_point
+        elif self.current_tool in ["rect", "circle", "polygon", "blur", "pixelate"]:
+            rect = self.get_draw_rect(self.start_point, current_point, event.modifiers())
+            self.refresh_temp_item_rect(rect)
         elif self.current_tool == "arrow":
-            self.update_arrow(pos)
+            endpoint = self.get_arrow_point(self.start_point, current_point, event.modifiers())
+            self.refresh_temp_item_arrow(endpoint)
 
+    def finish_drawing(self, event):
+        self.is_drawing = False
+        end_point = self.view.mapToScene(event.pos())
+
+        if self.temp_item:
+            self.scene.removeItem(self.temp_item)
+            self.temp_item = None
+
+        if self.current_tool != "pen":
+             if self.current_tool == "arrow":
+                 final_p2 = self.get_arrow_point(self.start_point, end_point, event.modifiers())
+                 self.push_undo()
+                 self.paint_arrow(self.start_point, final_p2)
+             else:
+                 rect = self.get_draw_rect(self.start_point, end_point, event.modifiers())
+                 if rect.width() < 2 or rect.height() < 2: return
+
+                 self.push_undo()
+                 self.paint_shape(self.current_tool, rect)
+
+             self.image_item.setPixmap(self.current_pixmap)
+
+    def paint_shape(self, tool, rect):
+        painter = QPainter(self.current_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(self.draw_color, self.draw_size, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+
+        if tool == "rect":
+            painter.drawRect(rect)
+        elif tool == "circle":
+            painter.drawEllipse(rect)
+        elif tool == "polygon":
+            cx, cy = rect.center().x(), rect.center().y()
+            rx, ry = rect.width()/2, rect.height()/2
+            radius = min(rx, ry)
+            points = calculate_ngon_points(cx, cy, radius, self.poly_sides)
+            if points:
+                qpoints = [QPointF(x, y) for x, y in points]
+                painter.drawPolygon(*qpoints)
+
+        painter.end()
+
+        if (tool == "blur" or tool == "pixelate") and not rect.isEmpty():
+             cv_img = convert_qpixmap_to_opencv(self.current_pixmap)
+             x, y, w, h = int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
+
+             if tool == "blur":
+                 processed = apply_blur(cv_img, x, y, w, h, self.blur_val)
+             else:
+                 processed = apply_pixelate(cv_img, x, y, w, h, self.pixel_val)
+
+             self.current_pixmap = convert_opencv_to_qpixmap(processed)
+
+    def paint_arrow(self, p1, p2):
+        painter = QPainter(self.current_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(self.draw_color, self.draw_size, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+
+        line = QPointF(p2.x() - p1.x(), p2.y() - p1.y())
+        length = (line.x()**2 + line.y()**2)**0.5
+
+        if length > 0:
+            angle = np.arctan2(line.y(), line.x())
+            arrow_size = self.draw_size * 3
+
+            p_arrow1 = QPointF(p2.x() - arrow_size * np.cos(angle - np.pi/6),
+                               p2.y() - arrow_size * np.sin(angle - np.pi/6))
+            p_arrow2 = QPointF(p2.x() - arrow_size * np.cos(angle + np.pi/6),
+                               p2.y() - arrow_size * np.sin(angle + np.pi/6))
+
+            path = QPainterPath()
+            path.moveTo(p2)
+            path.lineTo(p_arrow1)
+            path.lineTo(p_arrow2)
+            path.closeSubpath()
+
+            painter.setBrush(QBrush(self.draw_color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawPath(path)
+
+            offset = arrow_size * 0.5
+            p2_adjusted = QPointF(p2.x() - offset * np.cos(angle),
+                                  p2.y() - offset * np.sin(angle))
+
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawLine(p1, p2_adjusted)
+        painter.end()
+
+    def paint_on_pixmap(self, tool, p1, p2, final=True):
+        painter = QPainter(self.current_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(self.draw_color, self.draw_size, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        if tool == "pen":
+            painter.drawLine(p1, p2)
+        painter.end()
+
+    def handle_text_input(self, pos):
+        text, ok = QInputDialog.getText(self, "Add Text", "Enter text:")
+        if ok and text:
+            self.push_undo()
+            painter = QPainter(self.current_pixmap)
+            painter.setPen(QColor(self.draw_color))
+            font = QFont("Arial", self.text_font_size)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(pos, text)
+            painter.end()
+            self.image_item.setPixmap(self.current_pixmap)
+
+    def refresh_temp_item_rect(self, rect):
+        if self.temp_item:
+            self.scene.removeItem(self.temp_item)
+            self.temp_item = None
+
+        if self.current_tool == "rect":
+            self.temp_item = self.scene.addRect(rect, QPen(self.draw_color, self.draw_size), QBrush())
+        elif self.current_tool == "circle":
+            self.temp_item = self.scene.addEllipse(rect, QPen(self.draw_color, self.draw_size), QBrush())
         elif self.current_tool == "polygon":
-            self.update_polygon(rect)
+            cx, cy = rect.center().x(), rect.center().y()
+            rx, ry = rect.width()/2, rect.height()/2
+            radius = min(rx, ry)
+            points = calculate_ngon_points(cx, cy, radius, self.poly_sides)
+            if points:
+                qpoly = QPolygonF([QPointF(x, y) for x, y in points])
+                self.temp_item = self.scene.addPolygon(qpoly, QPen(self.draw_color, 1, Qt.PenStyle.DashLine), QBrush())
+        elif self.current_tool in ["blur", "pixelate"]:
+            self.temp_item = self.scene.addRect(rect, QPen(Qt.GlobalColor.white, 2, Qt.PenStyle.DashLine), QBrush(QColor(255, 255, 255, 50)))
 
-    def update_arrow(self, pos):
-        if not isinstance(self.temp_item, QGraphicsPathItem): return
+    def refresh_temp_item_arrow(self, current_pos):
+        if self.temp_item:
+            self.scene.removeItem(self.temp_item)
+            self.temp_item = None
 
         path = QPainterPath()
         path.moveTo(self.start_point)
-        path.lineTo(pos)
+        path.lineTo(current_pos)
 
-        dx, dy = pos.x() - self.start_point.x(), pos.y() - self.start_point.y()
-        angle = math.atan2(dy, dx)
-        head_size = self.current_size * 3
+        line = QPointF(current_pos.x() - self.start_point.x(), current_pos.y() - self.start_point.y())
+        angle = np.arctan2(line.y(), line.x())
+        arrow_size = self.draw_size * 3
+        p_arrow1 = QPointF(current_pos.x() - arrow_size * np.cos(angle - np.pi/6),
+                           current_pos.y() - arrow_size * np.sin(angle - np.pi/6))
+        p_arrow2 = QPointF(current_pos.x() - arrow_size * np.cos(angle + np.pi/6),
+                           current_pos.y() - arrow_size * np.sin(angle + np.pi/6))
+        path.moveTo(current_pos)
+        path.lineTo(p_arrow1)
+        path.moveTo(current_pos)
+        path.lineTo(p_arrow2)
 
-        p1 = QPointF(pos.x() - head_size * math.cos(angle - math.pi/6),
-                     pos.y() - head_size * math.sin(angle - math.pi/6))
-        p2 = QPointF(pos.x() - head_size * math.cos(angle + math.pi/6),
-                     pos.y() - head_size * math.sin(angle + math.pi/6))
-
-        path.lineTo(p1)
-        path.moveTo(pos)
-        path.lineTo(p2)
-
-        self.temp_item.setPath(path)
-
-    def update_polygon(self, rect):
-        if not isinstance(self.temp_item, QGraphicsPathItem): return
-
-        radius = math.sqrt(rect.width()**2 + rect.height()**2) / 2
-        points = calculate_ngon_points(rect.center().x(), rect.center().y(), radius, self.polygon_sides)
-
-        path = QPainterPath()
-        if points:
-            path.moveTo(QPointF(*points[0]))
-            for p in points[1:]:
-                path.lineTo(QPointF(*p))
-            path.closeSubpath()
-
-        self.temp_item.setPath(path)
-
-    def finish_drawing(self, pos):
-        self.is_drawing = False
-        self.current_path = None
-
-        if self.current_tool == "text":
-            text, ok = QInputDialog.getText(self, "Text", "Content:")
-            if ok and text:
-                item = self.scene.addText(text)
-                item.setPos(pos)
-                item.setDefaultTextColor(self.current_color)
-                item.setFont(QFont("Arial", self.text_size))
-                self.items_drawn.append(item)
-            return
-
-        if self.current_tool in ["blur", "pixelate"]:
-            if self.temp_item:
-                rect = self.temp_item.rect().toRect()
-                self.scene.removeItem(self.temp_item)
-                self.temp_item = None
-                self.apply_effect(rect)
-            return
-
-        if self.temp_item:
-            self.items_drawn.append(self.temp_item)
-            self.temp_item = None
-
-    def apply_effect(self, rect):
-        if rect.isEmpty(): return
-        img_rect = self.bg_item.boundingRect().toRect()
-        intersect = rect.intersected(img_rect)
-        if intersect.isEmpty(): return
-
-        base_pix = self.bg_item.pixmap().copy(intersect)
-        cv_img = convert_qpixmap_to_opencv(base_pix)
-
-        if self.current_tool == "pixelate":
-            cv_res = apply_pixelate(cv_img, 0, 0, intersect.width(), intersect.height(), self.pixel_intensity)
-        else:
-            ksize = (self.blur_intensity * 2) + 1
-            cv_res = apply_blur(cv_img, 0, 0, intersect.width(), intersect.height(), ksize)
-
-        patch = QGraphicsPixmapItem(convert_opencv_to_qpixmap(cv_res))
-        patch.setPos(QPointF(intersect.topLeft()))
-        self.scene.addItem(patch)
-        self.items_drawn.append(patch)
-
-    def undo_last(self):
-        if self.items_drawn:
-            item = self.items_drawn.pop()
-            self.scene.removeItem(item)
-            self.redo_stack.append(item)
-
-    def redo_last(self):
-        if self.redo_stack:
-            item = self.redo_stack.pop()
-            self.scene.addItem(item)
-            self.items_drawn.append(item)
-
-    def zoom_in(self):
-        self.view.scale(1.2, 1.2)
-        self.update_zoom_slider()
-
-    def zoom_out(self):
-        self.view.scale(0.8, 0.8)
-        self.update_zoom_slider()
-
-    def set_zoom(self, value):
-        factor = value / 100.0
-        self.view.resetTransform()
-        self.view.scale(factor, factor)
-
-    def update_zoom_slider(self):
-        factor = self.view.transform().m11()
-        self.toolbar.set_zoom_value(int(factor * 100))
-
-    def set_zoom_slider_val(self, val):
-        self.toolbar.slider_zoom.blockSignals(True)
-        self.toolbar.slider_zoom.setValue(val)
-        self.toolbar.slider_zoom.blockSignals(False)
-
-    def finish_copy(self):
-        self.scene.clearSelection()
-        img = self.render_final()
-        QApplication.clipboard().setPixmap(img)
-        self.bypass_close_confirm = True
-        self.close()
-
-    def finish_save(self):
-        self.scene.clearSelection()
-        img = self.render_final()
-        path, _ = QFileDialog.getSaveFileName(self, "Save Image", "screenshot.png", "PNG (*.png)")
-        if path:
-            img.save(path)
-            self.bypass_close_confirm = True
-            self.close()
-
-    def render_final(self):
-        r = self.scene.sceneRect()
-        img = QPixmap(r.size().toSize())
-        img.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(img)
-        self.scene.render(painter)
-        painter.end()
-        return img
+        self.temp_item = self.scene.addPath(path, QPen(self.draw_color, self.draw_size))
 
     def closeEvent(self, event):
-        if not self.bypass_close_confirm:
-            reply = QMessageBox()
-            reply.setWindowTitle("Exit Editor")
-            reply.setText("Are you sure you want to close? Unsaved changes will be lost.")
-            reply.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            reply.setDefaultButton(QMessageBox.StandardButton.No)
-
-            reply.setStyleSheet("""
-                QMessageBox { background-color: #171718; color: #f0f0f0; }
-                QLabel { color: #f0f0f0; }
-                QPushButton { background-color: #333; color: white; border: 1px solid #444; padding: 5px 15px; border-radius: 4px; }
-                QPushButton:hover { background-color: #444; border-color: #666; }
-            """)
-            ret = reply.exec()
-            if ret == QMessageBox.StandardButton.No:
-                event.ignore()
-                return
-        self.closed_signal.emit()
+        reply = QMessageBox.question(self, 'Close Editor', 'Are you sure you want to discard changes?',
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            self.closed_signal.emit()
+            event.accept()
+        else:
+            event.ignore()
