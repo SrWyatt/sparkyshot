@@ -1,0 +1,14 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1500" width="1500" height="1500">
+	<defs>
+		<image  width="780" height="105" id="img1" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAwwAAABpAgMAAADqwEycAAAAAXNSR0IB2cksfwAAAAxQTFRF/v7+////////////QEz24gAAAAR0Uk5Tpf98v6/qI6cAAACXSURBVHic7c9RFYAgAMBACWEfmhsNQvjhydsl2MY9r59bowdBD4YeDD0YejD0YOjB0IOhB0MPhh4MPRh6MPRg6MHQg6EHQw+GHgw9GHow9GDowdCDoQdDD4YeDD0YejD0YOjB0IOhB0MPhh4MPRh6MPRg6MHQg6EHQw+GHgw9GHow9GDowdCDoQdDD4YeDGc8PPPrhrfWBpV3jIg6MBwNAAAAAElFTkSuQmCC"/>
+	</defs>
+	<style>
+		.s0 { fill: #171718 } 
+	</style>
+	<path id="Rectángulo_1" fill-rule="evenodd" class="s0" d="m370.78 81.67h758.44c160.16 0 290 129.84 290 290v756.65c0 160.17-129.84 290-290 290h-758.44c-160.16 0-290-129.83-290-290v-756.64c0-160.17 129.84-290 290-290.01z"/>
+	<g id="Grupo_11">
+		<g id="Grupo_12">
+			<use id="_" href="#img1" x="360" y="697"/>
+		</g>
+	</g>
+</svg>
